@@ -1,0 +1,148 @@
+<!-- Midnight Mechanics – full Spotify API integration -->
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Midnight Mechanics</title>
+
+  <!-- Federo font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Federo&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --midnight-blue: #0B192F;
+      --deep-blue: #172A46;
+      --rose-gold: #B76E79;
+      --light-grey: #CCD6F6;
+      --slate-grey: #8892B0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Federo", sans-serif; background: var(--midnight-blue); color: var(--light-grey); line-height: 1.45; }
+    header { position: sticky; top: 0; background: var(--deep-blue); display: flex; align-items: center; gap: 1rem; padding: 1rem; z-index: 100; }
+    h1 { font-size: 1.6rem; color: var(--rose-gold); flex-shrink: 0; }
+    button, select, input { font-size: 0.9rem; }
+    button { background: var(--rose-gold); color: var(--midnight-blue); border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
+    select, input { background: var(--midnight-blue); color: var(--light-grey); border: 1px solid var(--rose-gold); padding: 0.4rem 0.6rem; border-radius: 4px; }
+    main { padding: 1rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px,1fr)); gap: 1rem; }
+    .track { background: var(--deep-blue); border: 1px solid var(--slate-grey); border-radius: 8px; display: flex; gap: 0.75rem; padding: 1rem; align-items: center; }
+    .thumb { width:56px; height:56px; border-radius:4px; }
+    .track-info { flex:1; }
+    .track-title { color: var(--rose-gold); font-weight:700; margin-bottom:0.3rem; }
+    .meta { font-size:0.85rem; color:var(--slate-grey); margin-bottom:0.5rem; }
+    .controls { display:flex; gap:0.5rem; }
+    footer { text-align:center; padding:2rem 1rem; font-size:0.85rem; color:var(--slate-grey); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Midnight Mechanics</h1>
+    <button id="login">Login with Spotify</button>
+    <select id="userPlaylists" hidden><option>Loading...</option></select>
+    <input id="search" type="text" placeholder="Search Spotify tracks..." hidden>
+    <button id="exportSpotify" hidden>Export to Spotify</button>
+  </header>
+
+  <main id="playlist"></main>
+
+  <footer>Built with HTML, CSS & vanilla JS • Federo • © 2025</footer>
+
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script>
+    const clientId = 'YOUR_SPOTIFY_CLIENT_ID';
+    const redirectUri = window.location.origin + window.location.pathname;
+    const scopes = ['playlist-modify-public','user-read-private','user-library-read','playlist-read-private'];
+
+    let token = null;
+    // On load, check for access token in URL
+    if(location.hash) {
+      const params = new URLSearchParams(location.hash.substring(1));
+      token = params.get('access_token');
+      if(token) {
+        history.replaceState({}, document.title, redirectUri);
+        initApp();
+      }
+    }
+
+    function login() {
+      const url = `https://accounts.spotify.com/authorize?client_id=${clientId}`+
+        `&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}`+
+        `&scope=${scopes.join('%20')}`;
+      window.location = url;
+    }
+    document.getElementById('login').onclick = login;
+
+    async function initApp() {
+      document.getElementById('login').hidden = true;
+      document.getElementById('search').hidden = false;
+      document.getElementById('exportSpotify').hidden = false;
+      // Fetch user playlists
+      const res = await fetch('https://api.spotify.com/v1/me/playlists', { headers:{ Authorization: 'Bearer '+token } });
+      const data = await res.json();
+      const sel = document.getElementById('userPlaylists');
+      sel.hidden = false;
+      sel.innerHTML = '<option value="new">Create New Playlist…</option>' +
+        data.items.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+
+      // Search handler
+      document.getElementById('search').onkeypress = async (e) => {
+        if(e.key==='Enter'){
+          const q = e.target.value;
+          const resp = await fetch(`https://api.spotify.com/v1/search?type=track&q=${encodeURIComponent(q)}`, { headers:{ Authorization: 'Bearer '+token }});
+          const json = await resp.json();
+          json.tracks.items.forEach(addTrack);
+        }
+      };
+
+      // Export to Spotify
+      document.getElementById('exportSpotify').onclick = async () => {
+        const userRes = await fetch('https://api.spotify.com/v1/me', {headers:{Authorization:'Bearer '+token}});
+        const userId = (await userRes.json()).id;
+        const playlistName = 'Midnight Mechanics';
+        // Create playlist
+        const createRes = await fetch(`https://api.spotify.com/v1/users/${userId}/playlists`,{
+          method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+          body: JSON.stringify({ name:playlistName, public:true })
+        });
+        const playlistId = (await createRes.json()).id;
+        // Add tracks
+        const uris = tracks.map(t=>`spotify:track:${t.id}`);
+        await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`,{
+          method:'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+          body: JSON.stringify({ uris })
+        });
+        alert('Playlist created on Spotify!');
+      };
+    }
+
+    // Track rendering + simple preview
+    const tracks = [];
+    const playlistEl = document.getElementById('playlist');
+    function addTrack(t){
+      if(tracks.find(x=>x.id===t.id)) return;
+      tracks.push(t);
+      render();
+    }
+    function render(){
+      playlistEl.innerHTML='';
+      tracks.forEach((t,i)=>{
+        const card = document.createElement('div'); card.className='track';
+        card.innerHTML = `
+          <img class="thumb" src="${t.album.images[2]?.url}" alt="Album art">
+          <div class="track-info">
+            <div class="track-title"><a href="${t.external_urls.spotify}" target="_blank">${t.name}</a></div>
+            <div class="meta">${t.artists.map(a=>a.name).join(', ')} • ${new Date(t.duration_ms).toISOString().substr(14,5)}</div>
+            <div class="controls"><button class="playBtn">▶︎</button></div>
+          </div>`;
+        playlistEl.appendChild(card);
+        const btn = card.querySelector('.playBtn');
+        const audio = new Audio(t.preview_url);
+        btn.onclick = ()=> audio.paused?audio.play():audio.pause();
+      });
+    }
+
+  </script>
+</body>
+</html>
